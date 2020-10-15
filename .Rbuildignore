@@ -14,3 +14,7 @@
 
 ^CRAN-RELEASE$
 ^logo_slurm\.svg$
+
+
+^.*\.ini$
+^.*/.*\.ini$
