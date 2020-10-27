@@ -18,8 +18,8 @@
 #' \code{slurm_options = list(time = "1:00:00", share = TRUE)}.
 #' See \url{http://slurm.schedmd.com/sbatch.html} for details on possible options.
 #' Note that full names must be used (e.g. "time" rather than "t") and that flags
-#' (such as "share") must be specified as TRUE. The "array", "job-name", "nodes", 
-#' "cpus-per-task" and "output" options are already determined by 
+#' (such as "share") must be specified as TRUE. The "array", "job-name", "nodes",
+#' "cpus-per-task" and "output" options are already determined by
 #' \code{slurm_apply} and should not be manually set.
 #'
 #' When processing the computation job, the Slurm cluster will output two types
@@ -55,11 +55,11 @@
 #' @param cpus_per_node The number of CPUs requested per node, i.e., how many
 #'   processes to run in parallel per node. This argument is mapped to the
 #'   Slurm parameter \code{cpus-per-task}.
-#' @param preschedule_cores Corresponds to the \code{mc.preschedule} argument of 
-#' \code{parallel::mcmapply}. Defaults to \code{TRUE}. If \code{TRUE}, the 
-#' rows of \code{params} are assigned to cores before computation. If \code{FALSE}, 
+#' @param preschedule_cores Corresponds to the \code{mc.preschedule} argument of
+#' \code{parallel::mcmapply}. Defaults to \code{TRUE}. If \code{TRUE}, the
+#' rows of \code{params} are assigned to cores before computation. If \code{FALSE},
 #' each row of \code{params} is executed by the next available core.
-#' Setting \code{FALSE} may be faster if 
+#' Setting \code{FALSE} may be faster if
 #' different values of \code{params} result in very variable completion time for
 #' jobs.
 #' @param global_objects A character vector containing the name of R objects to be
@@ -74,16 +74,18 @@
 #'   library trees to search through, or NULL. The default value of NULL
 #'   corresponds to libraries returned by \code{.libPaths()} on a cluster node.
 #'   Non-existent library trees are silently ignored.
-#' @param rscript_path The location of the Rscript command. If not specified, 
+#' @param rscript_path The location of the Rscript command. If not specified,
 #'   defaults to the location of Rscript within the R installation being run.
-#' @param r_template The path to the template file for the R script run on each node. 
+#' @param r_template The path to the template file for the R script run on each node.
 #'   If NULL, uses the default template "rslurm/templates/slurm_run_R.txt".
-#' @param sh_template The path to the template file for the sbatch submission script. 
+#' @param sh_template The path to the template file for the sbatch submission script.
 #'   If NULL, uses the default template "rslurm/templates/submit_sh.txt".
 #' @param slurm_options A named list of options recognized by \code{sbatch}; see
 #'   Details below for more information.
 #' @param submit Whether or not to submit the job to the cluster with
 #'   \code{sbatch}; see Details below for more information.
+#' @param save_version The save version for \code{saveRDS}; can be set to 2 for
+#'   backwards compatability with R < 3.5.0. Default is 3.
 #' @return A \code{slurm_job} object containing the \code{jobname} and the
 #'   number of \code{nodes} effectively used.
 #' @seealso \code{\link{slurm_call}} to evaluate a single function call.
@@ -99,12 +101,12 @@
 #' cleanup_files(sjob)
 #' }
 #' @export
-slurm_apply <- function(f, params, ..., jobname = NA, 
+slurm_apply <- function(f, params, ..., jobname = NA,
                         nodes = 2, cpus_per_node = 2, preschedule_cores = TRUE,
-                        global_objects = NULL, add_objects = NULL, 
-                        pkgs = rev(.packages()), libPaths = NULL, 
-                        rscript_path = NULL, r_template = NULL, sh_template = NULL, 
-                        slurm_options = list(), submit = TRUE) {
+                        global_objects = NULL, add_objects = NULL,
+                        pkgs = rev(.packages()), libPaths = NULL,
+                        rscript_path = NULL, r_template = NULL, sh_template = NULL,
+                        slurm_options = list(), submit = TRUE, save_version = 3) {
     # Check inputs
     if (!is.function(f)) {
         stop("first argument to slurm_apply should be a function")
@@ -121,13 +123,13 @@ slurm_apply <- function(f, params, ..., jobname = NA,
     if (!is.numeric(cpus_per_node) || length(cpus_per_node) != 1) {
         stop("cpus_per_node should be a single number")
     }
-    
+
     # Check for use of deprecated argument
     if (!missing("add_objects")) {
         warning("Argument add_objects is deprecated; use global_objects instead.", .call = FALSE)
         global_objects <- add_objects
     }
-    
+
     # Default templates
     if(is.null(r_template)) {
         r_template <- system.file("templates/slurm_run_R.txt", package = "rslurm")
@@ -136,24 +138,30 @@ slurm_apply <- function(f, params, ..., jobname = NA,
         sh_template <- system.file("templates/submit_sh.txt", package = "rslurm")
     }
 
+    # Check save_version
+    if (!(save_version %in% c(2, 3))) {
+      stop("save_version must be one of {2, 3}")
+    }
+
     jobname <- make_jobname(jobname)
 
     # Create temp folder
     tmpdir <- paste0("_rslurm_", jobname)
     dir.create(tmpdir, showWarnings = FALSE)
-    
+
     # Unpack additional arguments
     more_args <- list(...)
 
-    saveRDS(params, file = file.path(tmpdir, "params.RDS"))
-    saveRDS(f, file = file.path(tmpdir, "f.RDS"))
-    saveRDS(more_args, file = file.path(tmpdir, "more_args.RDS"))
+    saveRDS(params, file = file.path(tmpdir, "params.RDS"), version = save_version)
+    saveRDS(f, file = file.path(tmpdir, "f.RDS"), version = save_version)
+    saveRDS(more_args, file = file.path(tmpdir, "more_args.RDS"), version = save_version)
     if (!is.null(global_objects)) {
         save(list = global_objects,
              file = file.path(tmpdir, "add_objects.RData"),
-             envir = environment(f))
-    }    
-    
+             envir = environment(f),
+             version = save_version)
+    }
+
     # Get chunk size (nb. of param. sets by node)
     # Special case if less param. sets than CPUs in cluster
     if (nrow(params) < cpus_per_node * nodes) {
